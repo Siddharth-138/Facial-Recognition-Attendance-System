@@ -4,6 +4,8 @@ import os
 import shutil
 from train_model import train_recognition_model
 import subprocess
+from threading import Lock
+import threading
 import time
 import pandas as pd
 from flask import Flask, request, jsonify, render_template
@@ -20,7 +22,8 @@ from markupsafe import Markup, escape
 app = Flask(__name__)
 
 # Constants
-
+model_lock = Lock()
+training_complete = threading.Event()
 # Updated registration route in app.py
 @app.route('/update_page')
 def update_page():
@@ -79,6 +82,7 @@ def register_face():
                 def update_and_retrain():
                     try:
                         # Update class names
+                        global classifier_model, class_names
                         class_names = load_class_names()
                         if username not in class_names:
                             class_names.append(username)
@@ -88,16 +92,21 @@ def register_face():
                         success, message = train_recognition_model()
                         if success:
                             # Reload the models after training
-                            global classifier_model
-                            classifier_model, _ = load_classifier_model(device)
-                            print("Model retrained and reloaded successfully")
+                             with model_lock:
+                                classifier_model, class_names = load_classifier_model(device)
+                                print("Model retrained and reloaded successfully")
+                                # Set the event to signal training completion
+                                training_complete.set()
                         else:
                             print(f"Training failed: {message}")
                     
                     except Exception as e:
                         print(f"Error in retraining: {str(e)}")
+                    finally:
+                        # Always set the event, even in case of failure
+                        training_complete.set()
                 
-                import threading
+                training_complete.clear()
                 threading.Thread(target=update_and_retrain).start()
                 
                 return jsonify({
@@ -297,9 +306,10 @@ def update():
 @app.route('/recognize_face', methods=['POST'])
 def recognize_face():
     try:
-        data = request.get_json()
-        image_data = data['image']
-        action = data.get('action', 'enter')  # Get the action from request, default to 'enter'
+        with model_lock:
+            data = request.get_json()
+            image_data = data['image']
+            action = data.get('action', 'enter')  # Get the action from request, default to 'enter'
 
         # Convert image
         img_data = image_data.split(",")[1]
@@ -411,6 +421,24 @@ def recognize_face():
             "error": str(e),
             "message": "Error processing image"
         })
+def initialize_models():
+    global classifier_model, class_names, device, mtcnn, facenet_model
+    try:
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        mtcnn = MTCNN(keep_all=True, device=device)
+        facenet_model = InceptionResnetV1(pretrained='vggface2').eval().to(device)
+        
+        with model_lock:
+            classifier_model, class_names = load_classifier_model(device)
+        
+        # Set training complete event initially
+        training_complete.set()
+        
+        print("Models initialized successfully")
+    except Exception as e:
+        print(f"Error initializing models: {str(e)}")
+        raise
 
 if __name__ == '__main__':
+    initialize_models()
     app.run(debug=True)
