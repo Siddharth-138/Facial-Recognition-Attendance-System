@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Capture Images</title>
+</head>
+<body>
+    <h1>Capture Images for Training</h1>
+    <video id="video" width="640" height="480" autoplay></video>
+    <button id="captureButton">Capture Image</button>
+    <button id="saveButton">Save Images</button>
+    <div id="message"></div>
+
+    <script>
+        const video = document.getElementById('video');
+        const captureButton = document.getElementById('captureButton');
+        const saveButton = document.getElementById('saveButton');
+        const messageDiv = document.getElementById('message');
+        let images = [];
+        let imageCount = 0;
+
+        // Access the webcam
+        navigator.mediaDevices.getUserMedia({ video: true })
+            .then(stream => {
+                video.srcObject = stream;
+            })
+            .catch(err => {
+                messageDiv.innerText = 'Error accessing webcam: ' + err;
+            });
+
+        // Capture image
+        captureButton.addEventListener('click', () => {
+            if (imageCount < 300) {
+                const canvas = document.createElement('canvas');
+                canvas.width = 640;
+                canvas.height = 480;
+                const context = canvas.getContext('2d');
+                context.drawImage(video, 0, 0, canvas.width, canvas.height);
+                images.push(canvas.toDataURL('image/jpeg'));
+                imageCount++;
+                messageDiv.innerText = `Captured ${imageCount} images.`;
+            } else {
+                messageDiv.innerText = 'Maximum image count reached.';
+            }
+        });
+
+        // Save images to server
+        saveButton.addEventListener('click', () => {
+            fetch('/save_images', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ images: images })
+            })
+            .then(response => response.json())
+            .then(data => {
+                messageDiv.innerText = data.message;
+            })
+            .catch(error => {
+                messageDiv.innerText = 'Error saving images: ' + error;
+            });
+        });
+    </script>
+</body>
+</html>

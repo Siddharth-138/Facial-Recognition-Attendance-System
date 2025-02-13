@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Update Face Recognition System</title>
+    <style>
+        /* Previous styles remain the same */
+        body {
+            font-family: Arial, sans-serif;
+            background: linear-gradient(#141e30, #243b55);
+            margin: 0;
+            min-height: 100vh;
+            color: white;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 40px 20px;
+            background: rgba(0, 0, 0, 0.6);
+            border-radius: 10px;
+            box-shadow: 0 15px 25px rgba(0,0,0,.6);
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .input-group {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+
+        input {
+            padding: 10px;
+            margin: 10px;
+            width: 200px;
+            background: rgba(255,255,255,0.1);
+            border: none;
+            border-radius: 5px;
+            color: white;
+            outline: none;
+        }
+
+        input::placeholder {
+            color: rgba(255,255,255,0.7);
+        }
+
+        button {
+            background-color: #03e9f4;
+            border: none;
+            padding: 10px 20px;
+            margin: 5px;
+            cursor: pointer;
+            border-radius: 5px;
+            color: #141e30;
+            font-weight: bold;
+            transition: all 0.3s ease;
+        }
+
+        button:hover {
+            background-color: #05c5cf;
+            transform: scale(1.05);
+        }
+
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        #videoElement {
+            width: 100%;
+            max-width: 640px;
+            margin: 20px auto;
+            display: block;
+            border: 2px solid #03e9f4;
+            border-radius: 5px;
+        }
+
+        .progress {
+            margin: 20px 0;
+            padding: 15px;
+            background-color: rgba(255,255,255,0.1);
+            border-radius: 5px;
+            text-align: center;
+        }
+
+        .progress-bar {
+            height: 20px;
+            background-color: #03e9f4;
+            width: 0%;
+            border-radius: 5px;
+            transition: width 0.3s ease;
+        }
+
+        #message {
+            margin-top: 20px;
+            padding: 10px;
+            text-align: center;
+            color: #03e9f4;
+        }
+
+        canvas {
+            display: none;
+        }
+
+        .success-message {
+            display: none;
+            text-align: center;
+            padding: 20px;
+            background-color: rgba(40, 167, 69, 0.2);
+            border: 2px solid #28a745;
+            border-radius: 5px;
+            margin: 20px 0;
+        }
+
+        .home-button {
+            display: none;
+            background-color: #28a745;
+            color: white;
+            padding: 12px 24px;
+            text-decoration: none;
+            border-radius: 5px;
+            margin: 20px auto;
+            width: fit-content;
+        }
+
+        .home-button:hover {
+            background-color: #218838;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Fast Registration</h1>
+        </div>
+        
+        <div class="input-group">
+            <input type="text" id="username" placeholder="Enter username">
+            <button id="startButton" onclick="startCapture()">Start Camera</button>
+            <button id="stopButton" onclick="stopCapture()" disabled>Stop Capture</button>
+        </div>
+
+        <video id="videoElement" autoplay></video>
+        <canvas id="canvas"></canvas>
+
+        <div class="status-container">
+            <div id="progress" class="progress">
+                Ready to capture images
+                <div class="progress-bar" id="progressBar"></div>
+            </div>
+            <div id="message"></div>
+            <div id="success-message" class="success-message">
+                User Updated Successfully!
+                <br>
+                Model retraining started.
+            </div>
+            <a href="/" id="home-button" class="home-button">Return to Home</a>
+        </div>
+    </div>
+
+    <script>
+        let video = document.getElementById('videoElement');
+        let canvas = document.getElementById('canvas');
+        let startButton = document.getElementById('startButton');
+        let stopButton = document.getElementById('stopButton');
+        let successMessage = document.getElementById('success-message');
+        let homeButton = document.getElementById('home-button');
+        let progressBar = document.getElementById('progressBar');
+        let stream = null;
+        let isCapturing = false;
+    //    let captureInterval = null;
+        let totalCaptured = 0;
+        let pendingRequests = 0;
+        const maxConcurrentRequests = 5; // Maximum number of concurrent requests
+        const captureInterval = 100; // Capture every 100ms
+        const batchSize = 10; // Number of images to process in parallel
+
+        async function startCapture() {
+            const username = document.getElementById('username').value.trim();
+            if (!username) {
+                alert('Please enter a username');
+                return;
+            }
+
+            try {
+                stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { 
+                        width: { ideal: 640 },
+                        height: { ideal: 480 },
+                        frameRate: { ideal: 30 }
+                    } 
+                });
+                video.srcObject = stream;
+                document.getElementById('progress').innerHTML = 'Camera started - Fast capture mode enabled';
+                
+                startButton.disabled = true;
+                stopButton.disabled = false;
+                isCapturing = true;
+                
+                // Wait for video to be ready
+                await new Promise(resolve => {
+                    video.onloadedmetadata = resolve;
+                });
+                
+                startAutomaticCapture();
+            } catch (err) {
+                console.error("Error: " + err);
+                document.getElementById('progress').innerHTML = 'Failed to start camera: ' + err.message;
+            }
+        }
+
+        async function startAutomaticCapture() {
+            if (!isCapturing) return;
+            
+            const captureNextBatch = async () => {
+                if (!isCapturing || totalCaptured >= 300) {
+                    return;
+                }
+
+                const promises = [];
+                for (let i = 0; i < batchSize && totalCaptured + promises.length < 300; i++) {
+                    promises.push(captureImage());
+                }
+
+                await Promise.all(promises);
+                
+                if (isCapturing && totalCaptured < 300) {
+                    setTimeout(captureNextBatch, captureInterval);
+                }
+            };
+
+            captureNextBatch();
+        }
+
+        async function captureImage() {
+            if (pendingRequests >= maxConcurrentRequests) {
+                return;
+            }
+
+            const username = document.getElementById('username').value.trim();
+            
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            canvas.getContext('2d').drawImage(video, 0, 0);
+            
+            const image = canvas.toDataURL('image/jpeg', 0.8); // Reduced quality for faster upload
+
+            try {
+                pendingRequests++;
+                const response = await fetch('/register_face', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        username: username,
+                        image: image
+                    })
+                });
+
+                const data = await response.json();
+                pendingRequests--;
+                
+                if (data.error) {
+                    document.getElementById('message').innerHTML = `Error: ${data.error}`;
+                    stopCapture();
+                } else {
+                    document.getElementById('message').innerHTML = data.message;
+                    if (data.progress) {
+                        totalCaptured = data.progress;
+                        const progressPercent = (totalCaptured / 300) * 100;
+                        progressBar.style.width = `${progressPercent}%`;
+                        document.getElementById('progress').innerHTML = 
+                            `Progress: ${data.progress}/300 images captured`;
+                        
+                        if (data.complete) {
+                            stopCapture();
+                            document.getElementById('progress').innerHTML = 
+                                'Registration complete! Training model...';
+                            
+                            successMessage.style.display = 'block';
+                            homeButton.style.display = 'block';
+                            video.style.display = 'none';
+                        }
+                    }
+                }
+            } catch (error) {
+                pendingRequests--;
+                console.error('Error:', error);
+                document.getElementById('message').innerHTML = 'Error occurred while processing';
+            }
+        }
+
+        function stopCapture() {
+            isCapturing = false;
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+            }
+            startButton.disabled = false;
+            stopButton.disabled = true;
+            document.getElementById('progress').innerHTML = 'Capture stopped';
+        }
+
+        // Cleanup when leaving page
+        window.onbeforeunload = function() {
+            stopCapture();
+        };
+    </script>
+</body>
+</html>
